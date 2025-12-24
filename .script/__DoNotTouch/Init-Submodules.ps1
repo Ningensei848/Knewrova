@@ -340,7 +340,7 @@ function Safety-Precheck {
     if ($nonEmpty.Count -gt 0) { Warn ("  Non-empty paths: {0}" -f ($nonEmpty -join ", ")) }
     if ($missing.Count  -gt 0) { Warn ("  Missing paths:   {0}" -f ($missing  -join ", ")) }
 
-    # 任意：Rドライブ存在確認（ICS標準）
+    # 任意：Rドライブ存在確認
     if (Test-Path -LiteralPath "R:\") {
         Info "  R: drive detected."
     } else {

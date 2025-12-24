@@ -317,7 +317,8 @@ try {
   "i18n.logoutput"           = "true";
   # 1) Windows 共有環境での性能と安定性
   "core.fscache"             = "true";
-  "core.fsmonitor"           = "true";
+  "core.useBuiltinFSMonitor" = "false";
+  "fsmonitor.allowRemote"    = "false";
   "core.preloadIndex"        = "true";
   "core.splitIndex"          = "true";
   "gc.writeCommitGraph"      = "true";
@@ -390,9 +391,9 @@ try {
     "fetch.fsckObjects"       = "true";
     "fetch.prune"             = "true";
     "fetch.writeCommitGraph"  = "true";
-    "pull.ff"                 = "only";
-    "pull.rebase"             = "true";
-    "merge.ff"                = "only";
+    "pull.ff"                 = "true";
+    "pull.rebase"             = "false";
+    "merge.ff"                = "true";
     "merge.ours.name"         = "Prefer OURS (local~=origin) Version"; # cf. `.gitattributes`
     "merge.ours.driver"       = "true";       # なにもせず (ours) を残す (cp %A %A と同等)
     "merge.theirs.name"       = "Prefer THEIRS (upstream) Version"; # cf. `.gitattributes`
@@ -483,3 +484,35 @@ try {
   exit 1
 }
 # End of File
+
+# ------------------------------
+# CHANGELOG
+# ------------------------------
+# rev.4.2:
+#   - Ensure-GitConfigs に GLOBAL を追加（--global 設定の宣言的適用）
+#   - protocol.file.allow=always を GLOBAL セクションで適用
+#   - Summary に GLOBAL を追加
+# rev.4.1:
+#   - 重複関数を排除、未閉じ波括弧を修正
+#   - $PSScriptRoot のフォールバック ($script:ScriptRoot) を導入
+#   - .env の {{USER_ID}} / %VAR% 展開を堅牢化（文字列置換 + ExpandEnvironmentVariables）
+#   - Git.exe の探索に %USERPROFILE%\Software\PortableGit\cmd\git.exe を追加
+#   - ログの '->' 表記を修正
+#
+# rev.4:
+#   - ポータブル Git 対応（.env, ENV, 自動探索で git.exe を解決）
+#   - Invoke-Git ラッパで全 Git 呼び出しをフルパス化
+#   - R ドライブ事前確認 Assert-RDriveReady を追加
+#   - .env 読み込み（GIT_EXE / REMOTE_GIT_DIR / USER_ID / DRYRUN）
+#   - メッセージをポータブル前提に更新
+#
+# rev.3:
+#   - UNC パス明示拒否 + R:\ ドライブ強制
+#   - Convert-GitUrlToWindowsPath を [Uri] ベースで強化
+#   - BARE の fetch.prune / core.sharedRepository を削除
+#   - 成果サマリ出力を追加
+#   - origin 方針強制をオプション化（-EnforceOrigin -UserId）
+#   - コメントベースヘルプ（Get-Help 対応）を追加
+#
+# rev.2:
+#   - 初版（LOCAL/BARE の宣言的「検査＆是正」、DRYRUN、ログ整備）

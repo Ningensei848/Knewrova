@@ -7,8 +7,13 @@ EXIT_SUCCESS=0
 EXIT_FAILURE=1
 
 # デフォルト設定
+# USER_ID が未設定 or 空なら Unknown 相当なので、そのときだけ初期化する
+if [ -z "${USER_ID:-}" ]; then
+    p=${USERPROFILE:-}; p=${p//\\//}     # \→/ 正規化
+    USER_ID=${USER_ID:-${p##*/}}         # leaf 抽出（basename 不要）
+    : "${USER_ID:=${USER:-$(id -un 2>/dev/null || echo Unknown)}}"
+fi
 UPLOAD_ROOT="${UPLOAD_ROOT:-R:\\Upload}"
-USER_ID="${USER_ID:-UNKNOWN}"
 IMAGE_EXTS="${IMAGE_EXTS:-.png,.jpg,.jpeg,.gif,.bmp,.tif,.tiff,.webp}"
 DRY_RUN="${DRY_RUN:-false}"
 LOG_PATH="${LOG_PATH:-uploads.log}"

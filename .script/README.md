@@ -13,7 +13,6 @@ title: .script/README.md
 R:\
   UsersVault\{USER_ID}.git          ← 個人ベアリポジトリ
   Submodule\
-    Member\{USER_ID}.git            ← 個人向けサブモジュール
     Shared\User\{USER_ID}.git       ← 共有向けサブモジュール
   {TEAM_REPO}.git                   ← チーム用ベア
   Upload\                           ← 画像等の保存場所
@@ -57,9 +56,9 @@ powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
 
 ---
 
-### 3. `Setup-Submodules.ps1`
+### 3. `Init-Submodules.ps1`
 
-- **目的**: サブモジュールのセットアップ
+- **目的**: メインリポジトリに付属するサブモジュールの初期化
 
 #### Usage
 
@@ -67,18 +66,18 @@ powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
 net use R: "\\fileserver\share"
 # 検証
 powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
-  -File ".\.script\__DoNotTouch\Setup-Submodules.ps1" -Summary -DryRun
+  -File ".\.script\__DoNotTouch\Init-Submodules.ps1" -Summary -DryRun
 # Stable＝固定SHA再現
 powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
-  -File ".\.script\__DoNotTouch\Setup-Submodules.ps1" -Mode Stable -Summary
+  -File ".\.script\__DoNotTouch\Init-Submodules.ps1" -Mode Stable -Summary
 # Latest＝ブランチ先端へ
 powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
-  -File ".\.script\__DoNotTouch\Setup-Submodules.ps1" -Mode Latest -Summary
+  -File ".\.script\__DoNotTouch\Init-Submodules.ps1" -Mode Latest -Summary
 ```
 
 ---
 
-### 4. `Setup-UserSparseCheckout.ps1`
+### 4. `Init-UserSparseCheckout.ps1`
 
 - **目的**: 個人用リポジトリを初期化し、`R:\UsersVault\{USER_ID}.git` に push。
 
@@ -87,7 +86,7 @@ powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
 ```powershell
 net use R: "\\fileserver\share"
 powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
-  -File ".\.script\__DoNotTouch\Setup-UserSparseCheckout.ps1"
+  -File ".\.script\__DoNotTouch\Init-UserSparseCheckout.ps1"
 ```
 
 #### 完了チェックリスト（ログ対応）
@@ -101,11 +100,11 @@ powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
 - 全ユーザ処理（Process-AllUsers）開始
   - ターゲットベア初期化：Target bare repo does not exist. Creating... → Successfully created bare repo.
     - ✅ 既存確認→未存在→init --bare 成功。既存時は正常スキップに修正済み。
-  - ソースベア検証：Verifying source repository at 'R:\Knewrova.git'... → Source repository verified successfully.
+  - ソースベア検証：Verifying source repository at 'R:\CTH-Nexus.git'... → Source repository verified successfully.
     - ✅ HEAD 存在チェックOK。
-  - クローン：Cloning 'R:\Knewrova.git' ... → Cloning into 'A1200001'... done.
+  - クローン：Cloning 'R:\CTH-Nexus.git' ... → Cloning into 'username123456'... done.
     - ✅ --no-checkout クローン成功、作業ディレクトリへ移動。
-  - スパースチェックアウト：Initializing sparse-checkout (cone mode)... → Setting sparse-checkout paths for A1200001...
+  - スパースチェックアウト：Initializing sparse-checkout (cone mode)... → Setting sparse-checkout paths for username123456...
     - ✅ MyWork/ を含む対象パスに更新反映済み。
   - mainチェックアウト：Checking out 'main' branch... Already on 'main'
     - ✅ main のチェックアウト成功。
@@ -117,7 +116,7 @@ powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
   - 初回push：push -u origin main → Successfully pushed 'main' to 'origin'.
     - ✅ 追跡設定＆新規ブランチ作成（[new branch] main -> main）。
     - ※サーバ側 '$GIT_DIR' too big は通知ですが、push は成功しており影響なし。
-  - ユーザ単位サマリ：--- Successfully processed User: A1200001 in 66.92 seconds ---
+  - ユーザ単位サマリ：--- Successfully processed User: username123456 in 66.92 seconds ---
     - ✅ 所要時間と成功ログ出力。
 
 - 後処理：Cleaning up this run's work directory: ... → Work directory successfully deleted.
@@ -175,14 +174,14 @@ powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
 # DRY-RUN
 powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
   -File ".\.script\__DoNotTouch\RegisterSafeDirectory.ps1" `
-  -IdBaseDir "R:\UsersVault","R:\Submodule\Member" `
+  -IdBaseDir "R:\UsersVault","R:\Submodule\Shared\User" `
   -TargetDir "R:\.obsidian.git","R:\Knewrova.git" `
   -DryRun
 
 # 本番（承認なし）
 powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
   -File ".\.script\__DoNotTouch\RegisterSafeDirectory.ps1" `
-  -IdBaseDir "R:\UsersVault","R:\Submodule\Member" `
+  -IdBaseDir "R:\UsersVault","R:\Submodule\Shared\User" `
   -TargetDir "R:\.obsidian.git","R:\Knewrova.git" `
   -NoPrompt
 ```
@@ -262,6 +261,40 @@ powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
   -File ".\.script\__DoNotTouch\Setup-Obsidian.ps1" -Y
 ```
 
+## 7. Set-GitIdentity.ps1
+
+- **目的**: `git` のコミットに必要な個人ごとの情報を設定する（既定のOutlookに依存）
+
+#### Usage
+
+```powershell
+net use R: "\\fileserver\share"
+cd ClonedUserRepo/
+
+# DryRun
+powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
+  -File ".\.script\__DoNotTouch\Set-GitIdentity.ps1" -DryRun
+
+# 本番
+powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
+  -File ".\.script\__DoNotTouch\Set-GitIdentity.ps1"
+
+# 引数に指定した表示名で上書きするとき
+powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
+  -File ".\.script\__DoNotTouch\Set-GitIdentity.ps1" -NameOverride "表示名_(USERNAME)"
+```
+
+
+## パラメータ
+
+- `-TargetPath [string]`
+    - 対象となる **ローカル作業ツリー**のルートディレクトリ。既定はカレント。
+    - `-TargetPath` を省略すると、**カレントディレクトリ**が対象。
+
+- `-DryRun [switch]`
+  **実行せず予定だけ**を表示。**冗長ログ**で処理内容を詳細に確認できます。
+
+---
 
 ## `Pre-Commit` Hooks
 

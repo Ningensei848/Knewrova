@@ -308,6 +308,7 @@ try {
 
     # If Sync script exists, invoke it (pass RepoRoot, DryRun, Backup, Y)
     Invoke-OptionalSyncFromShare -VaultOrObsPath $VaultPath -DryRun:$DryRun -Backup:$Backup -Y:$Y
+    exit 0
 } catch {
     Write-Error $_.Exception.Message
     exit 1

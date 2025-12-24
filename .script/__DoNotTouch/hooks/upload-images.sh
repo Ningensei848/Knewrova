@@ -15,7 +15,46 @@ normalize_windows_path() {
 }
 log_message() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 log_error()   { echo "[ERROR] $*" >&2; }
+# ---------- User_ID ---------
+# フォールバック1: USERPROFILE から leaf（末尾ディレクトリ名）を抽出
+leaf_from_userprofile() {
+  p=${USERPROFILE:-}
+  [ -n "$p" ] || return 1
+  # Windows パスの \ を / に正規化
+  p=${p//\\//}
+  # 末尾セグメント抽出（basename 相当）
+  leaf=${p##*/}
+  [ -n "$leaf" ] || return 1
+  printf '%s\n' "$leaf"
+}
 
+# USER_ID を検証し、必要ならフォールバックして決定
+resolve_user_id() {
+  uid=${USER_ID:-}
+
+  # 事前指定があり、英数字・アンダースコア・ピリオドのみなら採用
+  if [ -n "$uid" ]; then
+    if printf '%s' "$uid" | LC_ALL=C grep -Eq '^[A-Za-z0-9_.]+$'; then
+      printf '%s\n' "$uid"
+      return 0
+    fi
+    # 不正なのでフォールバックへ進む
+  fi
+
+  # (1) USERPROFILE の leaf
+  if leaf="$(leaf_from_userprofile)"; then
+    printf '%s\n' "$leaf"
+    return 0
+  fi
+
+  # (2) id -un の出力
+  if uid="$(id -un 2>/dev/null)"; then
+    [ -n "$uid" ] && { printf '%s\n' "$uid"; return 0; }
+  fi
+
+  # いずれも取れない場合は Unknown
+  printf '%s\n' Unknown
+}
 # --- 画像パス絶対化（Vault直下 __Attachment/ 対応） ---
 resolve_abs_image_path() {
     local md_file="$1"     # 相対: ROOT基準
@@ -45,9 +84,10 @@ copy_one() {
     local src_rel="$1"   # Markdown上の表記
     local md_file="$2"   # 対象Markdown（相対: ROOT基準）
 
-    # 必須変数
-    if [ -z "$UPLOAD_ROOT" ] || [ -z "$USER_ID" ]; then
-        log_error "UPLOAD_ROOT or USER_ID is not set."; return 1
+    USER_ID="$(resolve_user_id)"
+
+    if [ -z "$UPLOAD_ROOT" ]; then
+        log_error "UPLOAD_ROOT is not set."; return 1
     fi
 
     # 共有ルート正規化（案内用にも使用）

@@ -218,7 +218,7 @@ main() {
     source_parent_env
     load_configuration
 
-    log_message "=== Session Started: ${USER_ID:-Unknown} ==="
+    log_message "=== Session Started ==="
     [ "$DRY_RUN" = "true" ] && echo "!!! DRY RUN MODE: No changes will be made !!!"
 
     local staged_files; staged_files="$(get_staged_markdowns)"

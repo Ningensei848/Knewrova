@@ -18,6 +18,46 @@ set -eu
 log() { printf '[commit-submodules] %s\n' "$*" 1>&2; }
 err() { printf '[commit-submodules] %s\n' "$*" 1>&2; }
 
+# ---------- User_ID ---------
+# フォールバック1: USERPROFILE から leaf（末尾ディレクトリ名）を抽出
+leaf_from_userprofile() {
+  p=${USERPROFILE:-}
+  [ -n "$p" ] || return 1
+  # Windows パスの \ を / に正規化
+  p=${p//\\//}
+  # 末尾セグメント抽出（basename 相当）
+  leaf=${p##*/}
+  [ -n "$leaf" ] || return 1
+  printf '%s\n' "$leaf"
+}
+
+# USER_ID を検証し、必要ならフォールバックして決定
+resolve_user_id() {
+  uid=${USER_ID:-}
+
+  # 事前指定があり、英数字・アンダースコア・ピリオドのみなら採用
+  if [ -n "$uid" ]; then
+    if printf '%s' "$uid" | LC_ALL=C grep -Eq '^[A-Za-z0-9_.]+$'; then
+      printf '%s\n' "$uid"
+      return 0
+    fi
+    # 不正なのでフォールバックへ進む
+  fi
+
+  # (1) USERPROFILE の leaf
+  if leaf="$(leaf_from_userprofile)"; then
+    printf '%s\n' "$leaf"
+    return 0
+  fi
+
+  # (2) id -un の出力
+  if uid="$(id -un 2>/dev/null)"; then
+    [ -n "$uid" ] && { printf '%s\n' "$uid"; return 0; }
+  fi
+
+  # いずれも取れない場合は Unknown
+  printf '%s\n' Unknown
+}
 # ---------- 引数（GIT_EXE）受け取り・検証 ----------
 if [ $# -lt 1 ]; then
   err "ERROR: GIT_EXE argument is required. Usage: $0 <GIT_EXE>"
@@ -110,14 +150,10 @@ else
 fi
 
 # ---------- 設定（固定） ----------
-USER_ID="${USER_ID:-}"
+# USER_ID が未設定 or 空なら Unknown 相当なので、そのときだけ初期化する
+USER_ID="$(resolve_user_id)"
 SUBMODULE_BRANCH="main"     # 固定
 SUBMODULE_COMMIT_MODE="all" # 固定
-
-if [ -z "$USER_ID" ]; then
-  err "ERROR: USER_ID is not set in .env. Cannot determine managed submodules."
-  exit 1
-fi
 
 if [ ! -f ".gitmodules" ]; then
   log "No .gitmodules found. Nothing to do."

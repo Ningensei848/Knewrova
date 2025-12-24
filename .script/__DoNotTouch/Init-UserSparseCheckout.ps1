@@ -1,5 +1,4 @@
-﻿
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 
 # --- Script Configuration ---
 $ErrorActionPreference = "Stop"
@@ -503,7 +502,7 @@ function Invoke-InitialPush {
 function Main {
     param(
         [string]$WorkRootDir = (Join-Path $PSScriptRoot "work"),
-        [string]$GitExe = $Script:GitExe
+        [string]$GitExe      = $Script:GitExe
     )
 
     if ($GitExe) { $Script:GitExe = $GitExe }
@@ -513,6 +512,7 @@ function Main {
     # 既定値（finally でも参照されるため、try の外で初期化）
     $GlobalSuccess = $false
     $ManualStop    = $false
+    $WorkBaseDir   = $null  # finally で参照するため事前宣言
 
     try {
         $IdListFile = Select-IdListFile
@@ -553,7 +553,47 @@ function Main {
             Write-Warning "Exception Message: $($_.Exception.Message)"
         }
     } finally {
-        if ($WorkBaseDir) { Cleanup-WorkDirectory -WorkBaseDir $WorkBaseDir }
+
+    # 一時ディレクトリ配下のクリーンアップ
+    if ($WorkBaseDir) {
+        Cleanup-WorkDirectory -WorkBaseDir $WorkBaseDir
+    }
+
+    # work ルート自体の削除（空の場合のみ、誤削除防止ガード付き）
+    try {
+        if (Test-Path -LiteralPath $WorkRootDir) {
+            $expectedPath = $null
+            $actualPath   = $null
+
+            try {
+                $expectedPath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "work") -ErrorAction Stop).Path
+                $actualPath   = (Resolve-Path -LiteralPath $WorkRootDir -ErrorAction Stop).Path
+            } catch {
+                Write-Verbose "Resolve-Path failed for WorkRootDir or expected path. Skip deletion."
+            }
+
+            if ($expectedPath -and $actualPath -and ($actualPath -eq $expectedPath)) {
+                # 空判定：何か1件でもエントリがあればスキップ（並行/他実行保護）
+                $hasEntries = Get-ChildItem -LiteralPath $WorkRootDir -Force -ErrorAction SilentlyContinue | Select-Object -First 1
+                if (-not $hasEntries) {
+                    try {
+                        Remove-Item -LiteralPath $WorkRootDir -Force -ErrorAction Stop
+                        Write-Host "Removed work root directory: '$WorkRootDir'"
+                    } catch {
+                        Write-Warning "Failed to remove work root directory: '$WorkRootDir'"
+                        Write-Warning "Exception Message: $($_.Exception.Message)"
+                    }
+                } else {
+                    Write-Verbose "Work root directory '$WorkRootDir' is not empty. Skip deletion."
+                }
+            } else {
+                Write-Verbose "WorkRootDir '$WorkRootDir' does not match expected '$expectedPath'. Skip deletion."
+            }
+        }
+    } catch {
+        Write-Warning "Unexpected error while cleaning WorkRootDir: $($_.Exception.Message)"
+    }
+
         $ScriptStopwatch.Stop()
 
         Write-Host "------------------------------------------------------------"

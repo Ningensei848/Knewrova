@@ -53,10 +53,29 @@ log_cli "hook_dir is $hook_dir"
 
 # 子（サブモジュール内）かどうか：出力の有無で判定
 is_submodule_worktree=0
-SUPER_OUT="$($GIT_EXE rev-parse --show-superproject-working-tree 2>/dev/null || true)"
-if [ -n "$SUPER_OUT" ]; then
+if [ -n "$SUPER" ]; then
   is_submodule_worktree=1
   log_cli "Detected submodule worktree; will skip parent-only orchestration (commit-submodules.sh) but continue other steps."
+fi
+
+# --- helper: staged 判定（早期終了に使用） ---
+# シェルの世界では 0 で真（というか成功）、 1 で偽（成功じゃない）となる
+staged_exists() {
+  if $GIT_EXE diff --cached --quiet --exit-code; then
+    return 1 # つまり、なんらかが「ある」ので1を返す
+  else
+    return 0 # なんにも「ない」！ので0を返す
+  fi
+}
+
+# --- 早期終了（子のみ） ---
+if [ "$is_submodule_worktree" -eq 1 ]; then
+  if staged_exists; then
+    log_cli "Staged changes detected in submodule worktree; continue."
+  else
+    log_cli "Early exit: nothing staged to commit in submodule worktree."
+    exit 0
+  fi
 fi
 
 # --- (1) 画像ステップ（親・子共通で実行） ---
@@ -92,18 +111,18 @@ else
 fi
 
 # --- (3) 親専用: upstream pull step （オリジナルと同期させる）---
-# if [ "$is_submodule_worktree" -eq 0 ]; then
-#   pull_upstream="$hook_dir/sync-original.sh"
-#   if [ -f "$pull_upstream" ]; then
-#     log_cli "Run sync-original.sh: $pull_upstream"
-#     sh "$pull_upstream" "$GIT_EXE" || log_cli "WARN: sync-original.sh returned non-zero; continuing."
-#     log_cli "sync-original.sh finished (pre-commit continues regardless)."
-#   else
-#     log_cli "WARN: sync-original.sh not found at $pull_upstream. Skipped."
-#   fi
-# else
-#   log_cli "Skip sync-original.sh (submodule worktree)."
-# fi
+if [ "$is_submodule_worktree" -eq 0 ]; then
+  pull_upstream="$hook_dir/sync-original.sh"
+  if [ -f "$pull_upstream" ]; then
+    log_cli "Run sync-original.sh: $pull_upstream"
+    sh "$pull_upstream" "$GIT_EXE" || log_cli "WARN: sync-original.sh returned non-zero; continuing."
+    log_cli "sync-original.sh finished (pre-commit continues regardless)."
+  else
+    log_cli "WARN: sync-original.sh not found at $pull_upstream. Skipped."
+  fi
+else
+  log_cli "Skip sync-original.sh (submodule worktree)."
+fi
 
 # --- (x) 他ステップをここに追記可能（直列/必要に応じて） ---
 # 例：

@@ -117,24 +117,39 @@ desktop.ini binary
 
 # --- Merge Strategy ---
 # --> .git/config に `[merge "xxx"]` セクションを書き込むことで設定が有効化
-# === ローカル（自分側）を常に採用 ==================
-MyWork/* merge=ours
-Shared/User/* merge=ours
-Shared/Project/* merge=ours
 # === upstream（相手側）を常に採用 ==============
-LICENSE merge=theirs
-README.md merge=theirs
-.env.example merge=theirs
-.gitignore merge=theirs
-.gitmodules merge=theirs
-.gitattributes merge=theirs
-.obsidian merge=theirs
-# --- * (wildcard) によるフォルダ指定
-__Attachment/* merge=theirs
-__Document/* merge=theirs
-__Template/* merge=theirs
-.script/* merge=theirs
-# --- 拡張子によるファイル指定
-*.ps1 merge=theirs
-*.sh  merge=theirs
+*                   merge=theirs
+/LICENSE            merge=theirs
+/README.md          merge=theirs
+/.env.example       merge=theirs
+/.gitignore         merge=theirs
+/.gitmodules        merge=theirs
+/.gitattributes     merge=theirs
+
+# --- 再帰フォルダ指定（相手側）
+/__Attachment/**    merge=theirs
+/__Document/**      merge=theirs
+/__Template/**      merge=theirs
+
+# --- 拡張子によるファイル指定（相手側）
+/.script/**/*.ps1   merge=theirs
+/.script/**/*.sh    merge=theirs
+
+# === ローカル（自分側）を常に採用=====
+# 拡張子ルールを超えて MyWork/Shared は常に ours にする
+/.obsidian/**       merge=ours
+/MyWork/**          merge=ours
+/Shared/User/**     merge=ours
+/Shared/Project/**  merge=ours
+
+# （必要に応じて例外をさらに細かく）
+# /Shared/Project/*.ps1 merge=ours
+
+# 最後に、例外的な上書き（.gitattributes は「最後にマッチした規則が勝ち」）
+/Shared/User/README.md     merge=theirs
+/Shared/Project/README.md  merge=theirs
+/MyWork/README.md          merge=theirs
+/.script/hooks/pre-commit  merge=theirs
+/.script/hooks/pre-push    merge=theirs
+/.script/README.md         merge=theirs
 # =====================================

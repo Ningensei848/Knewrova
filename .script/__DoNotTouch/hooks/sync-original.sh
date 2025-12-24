@@ -1,10 +1,12 @@
 #!/usr/bin/env sh
 # .script/__DoNotTouch/hooks/sync-original.sh
 # Purpose:
-#   Synchronize with the original repository (remote 'upstream') by rebasing current work onto upstream/main.
-#   - Explicitly stash local changes (including untracked), then restore after rebase.
-#   - If explicit stash fails, fall back to autostash for the pull.
-#   - Never write files (CLI-only hints). Always exit 0 so pre-commit continues.
+#   Synchronize with the original repository (remote 'upstream') by FETCH + MERGE (no rebase).
+#   - Prefer fast-forward: merge --ff --no-edit upstream/main
+#   - If non-FF, perform a normal merge and rely on .gitattributes + merge-driver (ours/theirs) for auto-resolution.
+#   - Explicitly stash local changes (including untracked), then restore after merge.
+#   - After merge, always update submodules to the latest of their tracked branches (remote mode).
+#   - Never open editor (use --no-edit). CLI-only hints/logs. Always exit 0 so pre-commit continues.
 #   - Works in parent and submodule worktrees. MAIN_BRANCH is fixed to 'main'.
 
 set -eu
@@ -12,11 +14,11 @@ set -eu
 # --- logging helpers (stderr) ---
 log_cli() {
   ts="$(date '+%Y-%m-%d %H:%M:%S')"
-  printf '[pre-commit][pull-upstream] %s %s\n' "$ts" "$*" 1>&2
+  printf '[pre-commit][merge-upstream] %s %s\n' "$ts" "$*" 1>&2
 }
-warn() { printf '[pre-commit][pull-upstream] WARN: %s\n' "$*" 1>&2; }
-err()  { printf '[pre-commit][pull-upstream] ERROR: %s\n' "$*" 1>&2; }
-hint() { printf '[pre-commit][pull-upstream] HINT:\n%s\n' "$*" 1>&2; }
+warn() { printf '[pre-commit][merge-upstream] WARN: %s\n' "$*" 1>&2; }
+err()  { printf '[pre-commit][merge-upstream] ERROR: %s\n' "$*" 1>&2; }
+hint() { printf '[pre-commit][merge-upstream] HINT:\n%s\n' "$*" 1>&2; }
 
 # --- args: prefer passed GIT_EXE, fallback to PATH ---
 GIT_EXE="${1:-}"
@@ -32,6 +34,7 @@ log_cli "GIT_EXE: $GIT_EXE"
 
 # --- constants ---
 MAIN_BRANCH="main"
+SUBMODULE_JOBS="${GIT_SUBMODULE_JOBS:-4}"  # parallel update
 
 # --- locate worktree root (parent or child) ---
 SUPER="$($GIT_EXE rev-parse --show-superproject-working-tree 2>/dev/null || true)"
@@ -54,7 +57,7 @@ fi
 BRANCH="$($GIT_EXE symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
 if [ -z "$BRANCH" ]; then
   warn "Detached HEAD. Skip original sync."
-  hint "Switch to a branch (e.g. main):\n  git switch main\nThen:\n  git pull --rebase upstream main"
+  hint "Switch to a branch (e.g. main):\n  git switch main\nThen:\n  git fetch upstream --prune --no-tags\n  git merge --ff --no-edit upstream/main"
   exit 0
 fi
 log_cli "Current branch: $BRANCH"
@@ -84,7 +87,7 @@ fi
 # ensure upstream branch exists
 if ! $GIT_EXE rev-parse --verify "refs/remotes/upstream/$MAIN_BRANCH" >/dev/null 2>&1; then
   warn "Upstream branch 'upstream/$MAIN_BRANCH' not found. Skip."
-  hint "Upstream branch not found.\nTry:\n  git fetch upstream $MAIN_BRANCH\n  git pull --rebase upstream $MAIN_BRANCH"
+  hint "Upstream branch not found.\nTry:\n  git fetch upstream $MAIN_BRANCH\n  git merge --ff --no-edit upstream/$MAIN_BRANCH"
   exit 0
 fi
 
@@ -103,7 +106,7 @@ if [ "${BEHIND:-0}" -eq 0 ]; then
   exit 0
 fi
 
-# --- explicit stash (save & tracked name) with index refresh ---
+# --- explicit stash (save & untracked) with index refresh ---
 $GIT_EXE update-index -q --refresh || true
 
 HAS_CHANGES="0"
@@ -119,7 +122,7 @@ if [ "$HAS_CHANGES" = "1" ]; then
   STASH_ERR=""
   if ! STASH_ERR="$($GIT_EXE stash push -u -m "$STASH_NAME" 2>&1 >/dev/null)"; then
     warn "Failed to create stash. stderr: ${STASH_ERR:-<empty>}"
-    hint "Falling back to autostash on pull. If that fails, stash manually:\n  git stash push -u -m \"$STASH_NAME\""
+    hint "If merge fails due to local changes, stash manually:\n  git stash push -u -m \"$STASH_NAME\""
   else
     STASH_REF="$($GIT_EXE stash list | head -n1 | awk -F: '{print $1}')"
     log_cli "Stash created: ${STASH_REF:-<unknown>} ($STASH_NAME)"
@@ -128,37 +131,57 @@ else
   log_cli "No local changes; explicit stash not needed."
 fi
 
-# --- perform pull --rebase (with fallback to autostash when explicit stash failed) ---
-log_cli "Start: git pull --rebase upstream $MAIN_BRANCH"
-PULL_ERR=""
-if [ -n "$STASH_REF" ]; then
-  # explicit stash exists; rebase without autostash
-  if ! PULL_ERR="$($GIT_EXE -c pull.rebase=true pull --rebase --no-tags upstream "$MAIN_BRANCH" 2>&1 >/dev/null)"; then
-    err "git pull --rebase failed (explicit-stash mode). stderr: ${PULL_ERR:-<empty>}"
+# --- Decide FF or normal merge ---
+UPSTREAM_REF="upstream/$MAIN_BRANCH"
+FF_POSSIBLE=1
+if $GIT_EXE merge-base --is-ancestor HEAD "$UPSTREAM_REF"; then
+  FF_POSSIBLE=0
+fi
+
+# --- perform merge (no editor) ---
+log_cli "Start: git merge --ff --no-edit $UPSTREAM_REF"
+MERGE_ERR=""
+if ! MERGE_ERR="$($GIT_EXE merge --ff --no-edit "$UPSTREAM_REF" 2>&1 >/dev/null)"; then
+  err "git merge failed. stderr: ${MERGE_ERR:-<empty>}"
+  hint "Merge failed.\nCheck:\n  - .gitattributes（merge=ours/theirs）\n  - .git/config [merge \"ours\"/\"theirs\"] driver\n  - ongoing operations（git status）\n  - try: git merge --abort"
+  [ -n "$STASH_REF" ] && warn "Explicit stash remains. You can restore later:\n  git stash pop --index \"$STASH_REF\""
+  exit 0
+fi
+
+# --- Submodules: always remote tracking update (recursive) ---
+if [ -f ".gitmodules" ]; then
+  log_cli "Submodules detected. Sync URLs from .gitmodules (recursive)."
+  if ! $GIT_EXE submodule sync --recursive >/dev/null 2>&1; then
+    warn "submodule sync failed."
+    hint "Try:\n  git submodule sync --recursive\n  git config -f .gitmodules --list"
+  fi
+
+  log_cli "Update submodules to remote tracked branches (recursive, jobs=$SUBMODULE_JOBS)."
+  if ! $GIT_EXE submodule update --init --remote --recursive --checkout --jobs "$SUBMODULE_JOBS" >/dev/null 2>&1; then
+    warn "submodule update --remote failed."
+    hint "Try:\n  git submodule update --recursive --remote --progress\nIf branches are missing in .gitmodules:\n  git config -f .gitmodules --list | findstr /C:branch\n  # Set: git config -f .gitmodules submodule.<name>.branch main\n  git submodule sync --recursive"
   fi
 else
-  # no explicit stash -> try autostash
-  if ! PULL_ERR="$($GIT_EXE -c pull.rebase=true -c rebase.autoStash=true pull --rebase --no-tags upstream "$MAIN_BRANCH" 2>&1 >/dev/null)"; then
-    err "git pull --rebase (autostash) failed. stderr: ${PULL_ERR:-<empty>}"
-  fi
+  log_cli "No .gitmodules. Skipping submodule sync/update."
 fi
 
 # --- success path: restore explicit stash if it exists ---
-if [ -z "$PULL_ERR" ]; then
-  log_cli "Completed: rebase onto upstream/$MAIN_BRANCH"
-  if [ -n "$STASH_REF" ]; then
-    log_cli "Restoring stash: $STASH_REF"
-    if $GIT_EXE stash pop --index "$STASH_REF" >/dev/null 2>&1; then
-      log_cli "Stash restored successfully."
-      exit 0
-    else
-      warn "Stash pop resulted in conflicts or failed."
-      CONFLICTS="$($GIT_EXE diff --name-only --diff-filter=U 2>/dev/null || true)"
-      if [ -n "$CONFLICTS" ]; then
-        hint "Conflicts after stash restore in:\n$CONFLICTS\nResolve and continue:\n  git status\n  # edit files\n  git add <files>\n  # rebaseは既に完了しています。必要ならそのままコミットしてください。"
-      else
-        hint "Stash restore failed.\nTry:\n  git stash apply --index \"$STASH_REF\""
-      fi
-      exit 0
-    fi
+if [ -n "$STASH_REF" ]; then
+  log_cli "Restoring stash: $STASH_REF"
+  if $GIT_EXE stash pop --index "$STASH_REF" >/dev/null 2>&1; then
+    log_cli "Stash restored successfully."
+    exit 0
   else
+    warn "Stash pop resulted in conflicts or failed."
+    CONFLICTS="$($GIT_EXE diff --name-only --diff-filter=U 2>/dev/null || true)"
+    if [ -n "$CONFLICTS" ]; then
+      hint "Conflicts after stash restore in:\n$CONFLICTS\nResolve and continue:\n  git status\n  # edit files\n  git add <files>"
+    else
+      hint "Stash restore failed.\nTry:\n  git stash apply --index \"$STASH_REF\""
+    fi
+    exit 0
+  fi
+else
+  log_cli "Merge completed (FF=${FF_POSSIBLE}) and submodules updated (remote)."
+  exit 0
+fi

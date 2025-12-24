@@ -22,7 +22,7 @@ Clone-and-Initialize.ps1
 
 [CmdletBinding(PositionalBinding = $false)]
 param(
-    # Step 1: net use に渡す UNC パス（例：\\fileserver\ICS\UsersVault）
+    # Step 1: net use に渡す UNC パス（例：\\fileserver\TEAM\UsersVault）
     [string]$rShareUNC,
 
     # Step 2: clone の対象（R:\UsersVault\{NAME}.git のみ許可）
@@ -198,7 +198,7 @@ if ($missing.Count -gt 0) {
 
 # ===== パターン検証（従来の ValidatePattern 相当） =====
 if ($rShareUNC_Final -notmatch '^\\\\') {
-    Write-Log ERROR "rShareUNC は UNC 形式である必要があります（例：\\fileserver\ICS\UsersVault）。指定値: $rShareUNC_Final"
+    Write-Log ERROR "rShareUNC は UNC 形式である必要があります（例：\\fileserver\TEAM\UsersVault）。指定値: $rShareUNC_Final"
     exit 1
 }
 if ($repoPath_Final -notmatch '^R:\\UsersVault\\[^\\]+\.git$') {
@@ -381,13 +381,15 @@ try {
 # ===== Step 4: upstream の設定（R:\{NAME}.git のみ許可、存在＆ベア判定）=====
 try {
     if (-not $DryRun) {
-        # ドライブレター始まりのローカルパスなら prefix 付与
-        if ($teamRepo_Final -match '^(?i)[A-Z]:') {
-            $teamRepo_Final = 'file:///' + $teamRepo_Final
-        }
+        # ベアリポジトリの存在を検証した後、upstream の設定を開始
         Assert-BareRepo -Path $teamRepo_Final
         Write-Log INFO "upstream を設定します: $teamRepo_Final"
 
+        # ドライブレター始まりのローカルパスなら prefix 付与
+        if ($teamRepo_Final -match '^(?i)[A-Z]:') {
+            $normalized = $teamRepo_Final -replace '\\', '/'
+            $teamRepo_Final = 'file:///' + $normalized
+        }
         # 既存チェック
         $existingUpstreamUrl = ''
         try { $existingUpstreamUrl = (& $GitExe -C "$VaultPath" remote get-url upstream 2>$null) } catch { $existingUpstreamUrl = '' }
@@ -468,8 +470,7 @@ try {
 $PostScripts = @(
     ".script\__DoNotTouch\Git-ConfigCheck.ps1",
     ".script\__DoNotTouch\Set-HooksPath-For-Submodules.ps1",
-    ".script\__DoNotTouch\Setup-Obsidian.ps1",
-    ".script\__DoNotTouch\Setup-RepoMaintenance.ps1"
+    ".script\__DoNotTouch\Setup-Obsidian.ps1"
 )
 
 try {

@@ -1,0 +1,16 @@
+{
+  "scope": {
+    "mode": "under",
+    "roots": [
+      "Shared"
+    ]
+  },
+  "files": false,
+  "folders": true,
+  "map": {
+    "username": "氏名"
+  },
+  "order": [
+    "username"
+  ]
+}
