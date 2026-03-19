@@ -15,7 +15,6 @@ load_env "$ROOT/.env"
 USER_ID="$(resolve_user_id)"
 
 SUBMODULE_BRANCH="main"
-SUBMODULE_JOBS="${GIT_SUBMODULE_JOBS:-8}"
 
 [ ! -f ".gitmodules" ] && exit 0
 
@@ -64,67 +63,49 @@ fi
 log_info "Managed Submodules for $USER_ID:"
 while read -r p; do [ -n "$p" ] && log_info "  - $p"; done <<< "$managed"
 
-tmpdir="$(mktemp -d 2>/dev/null || mktemp -d -t commit-submodules)"
-success_list="$tmpdir/committed.list"
-error_list="$tmpdir/commit_errors.list"
-touch "$success_list" "$error_list"
+# --- 1. 変更検知とコミット (対象が数個のためシンプルに直列処理) ---
+failed=0
+committed_paths=()
 
-# --- 1. 変更検知とコミット ---
-commit_pids=()
 while read -r p; do
     [ -z "$p" ] && continue
     [ ! -e "$p/.git" ] && continue
 
-    (
-        g() { "$GIT_EXE" -C "$p" -c core.hooksPath= "$@"; }
-        
-        if g status --porcelain | grep -q .; then
-            current_branch="$(g rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-            if [ "$current_branch" != "$SUBMODULE_BRANCH" ]; then
-                if ! g checkout "$SUBMODULE_BRANCH" >/dev/null 2>&1; then
-                    g stash push -u -q -m "pre-commit auto-stash" >/dev/null 2>&1 || true
-                    g checkout "$SUBMODULE_BRANCH" >/dev/null 2>&1 || g checkout -b "$SUBMODULE_BRANCH" >/dev/null 2>&1
-                    g stash pop -q >/dev/null 2>&1 || true
-                fi
-            fi
-
-            g add -A
-            msg="pre-commit: update $p ($(date '+%Y-%m-%d %H:%M'))"
-            
-            if g commit -m "$msg" --no-verify >/dev/null 2>&1; then
-                echo "$p" >> "$success_list"
-            else
-                echo "$p" >> "$error_list"
-                exit 1
+    g() { "$GIT_EXE" -C "$p" -c core.hooksPath= "$@"; }
+    
+    # 差分がある場合のみ処理
+    if g status --porcelain | grep -q .; then
+        current_branch="$(g rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+        if [ "$current_branch" != "$SUBMODULE_BRANCH" ]; then
+            if ! g checkout "$SUBMODULE_BRANCH" >/dev/null 2>&1; then
+                g stash push -u -q -m "pre-commit auto-stash" >/dev/null 2>&1 || true
+                g checkout "$SUBMODULE_BRANCH" >/dev/null 2>&1 || g checkout -b "$SUBMODULE_BRANCH" >/dev/null 2>&1
+                g stash pop -q >/dev/null 2>&1 || true
             fi
         fi
-    ) &
-    commit_pids+=($!)
-    
-    if [ "${#commit_pids[@]}" -ge "$SUBMODULE_JOBS" ]; then
-        for pid in "${commit_pids[@]}"; do wait "$pid" || true; done
-        commit_pids=()
+
+        g add -A
+        msg="pre-commit: update $p ($(date '+%Y-%m-%d %H:%M'))"
+        
+        if g commit -m "$msg" --no-verify >/dev/null 2>&1; then
+            committed_paths+=("$p")
+        else
+            log_error "Commit failed in submodule: $p"
+            failed=1
+        fi
     fi
 done <<< "$managed"
 
-for pid in "${commit_pids[@]}"; do wait "$pid" || true; done
-
-failed_commits="$(cat "$error_list" 2>/dev/null || true)"
-committed_paths="$(cat "$success_list" 2>/dev/null || true)"
-
-if [ -n "$failed_commits" ]; then
-    log_error "One or more submodule commits failed:"
-    while read -r f; do [ -n "$f" ] && log_error "  - $f"; done <<< "$failed_commits"
-    rm -rf "$tmpdir"
+if [ "$failed" -eq 1 ]; then
+    log_error "One or more submodule commits failed. Aborting parent commit."
     exit 1
 fi
 
-[ -z "$committed_paths" ] && rm -rf "$tmpdir" && exit 0
+[ ${#committed_paths[@]} -eq 0 ] && exit 0
 
 # --- 2. 親で gitlink をステージ ---
-while read -r p; do
-    [ -n "$p" ] && "$GIT_EXE" add -- "$p"
-done <<< "$committed_paths"
+for p in "${committed_paths[@]}"; do
+    "$GIT_EXE" add -- "$p"
+done
 
-rm -rf "$tmpdir"
 exit 0

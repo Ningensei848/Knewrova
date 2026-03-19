@@ -15,7 +15,6 @@ load_env "$ROOT/.env"
 USER_ID="$(resolve_user_id)"
 
 SUBMODULE_BRANCH="main"
-SUBMODULE_JOBS="${GIT_SUBMODULE_JOBS:-8}"
 
 [ ! -f ".gitmodules" ] && exit 0
 
@@ -63,23 +62,25 @@ fi
 
 log_info "Pushing managed submodules for $USER_ID..."
 
-push_pids=()
 push_errors=0
+
+# 対象が数個前提のため、シンプルな直列処理で確実に行う
 while read -r p; do
     [ -z "$p" ] && continue
     [ ! -e "$p/.git" ] && continue
 
-    # 並列でプッシュを実行
-    "$GIT_EXE" -C "$p" push origin "$SUBMODULE_BRANCH" >/dev/null 2>&1 &
-    push_pids+=($!)
-    
-    if [ "${#push_pids[@]}" -ge "$SUBMODULE_JOBS" ]; then
-        for pid in "${push_pids[@]}"; do wait "$pid" || push_errors=$((push_errors + 1)); done
-        push_pids=()
-    fi
-done <<< "$managed"
+    safe_p="$(echo "$p" | sed 's|/|_|g')"
+    err_log="$ROOT/.git/push_err_$safe_p.log"
 
-for pid in "${push_pids[@]}"; do wait "$pid" || push_errors=$((push_errors + 1)); done
+    # Git push は差分がなければ "Everything up-to-date" で即座に終了するため、事前の差分チェックは不要
+    if ! "$GIT_EXE" -C "$p" push origin "$SUBMODULE_BRANCH" >/dev/null 2>"$err_log"; then
+        log_error "Submodule push failed [$p]:"
+        cat "$err_log" >&2
+        push_errors=$((push_errors + 1))
+    fi
+    rm -f "$err_log" 2>/dev/null || true
+
+done <<< "$managed"
 
 if [ "$push_errors" -gt 0 ]; then
     log_error "$push_errors submodule push(es) failed. Parent push continues."
