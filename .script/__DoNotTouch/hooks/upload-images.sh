@@ -10,7 +10,7 @@ ROOT="$(resolve_root)"
 load_env "$ROOT/.env"
 USER_ID="$(resolve_user_id)"
 
-# --- 画像パス絶対化（Vault直下 __Attachment/ 対応） ---
+# --- 画像パス絶対化（Vault直下 __Attachment/ とサブディレクトリ YYYY/MM/ 対応） ---
 resolve_abs_image_path() {
     local md_file="$1"     # 相対: ROOT基準
     local img_path="$2"    # Markdown記載の画像パス
@@ -19,12 +19,23 @@ resolve_abs_image_path() {
         echo "$img_path"; return 0
     fi
 
-    local abs
+    local abs=""
+    local md_dir; md_dir="$(dirname "$md_file")"
+
     if [[ "$img_path" == __Attachment/* ]]; then
         abs="$ROOT/$img_path"
-    else
-        local md_dir; md_dir="$(dirname "$md_file")"
+    elif [ -f "$ROOT/$md_dir/$img_path" ]; then
         abs="$ROOT/$md_dir/$img_path"
+    else
+        # __Attachment 以下のサブディレクトリ (YYYY/MM 等) から検索
+        local base_name="$(basename "$img_path")"
+        local found
+        found="$(find "$ROOT/__Attachment" -type f -name "$base_name" 2>/dev/null | head -n 1 || true)"
+        if [ -n "$found" ]; then
+            abs="$found"
+        else
+            abs="$ROOT/$md_dir/$img_path"
+        fi
     fi
 
     normalize_path "$abs"
@@ -39,14 +50,6 @@ copy_one() {
     fi
 
     local upload_root; upload_root="$(normalize_path "$UPLOAD_ROOT")"
-    local dest_rel
-
-    if [[ "$src_rel" == __Attachment/* ]]; then
-        dest_rel="$src_rel"
-    else
-        dest_rel="$(basename "$src_rel")"
-    fi
-
     local src_abs; src_abs="$(resolve_abs_image_path "$md_file" "$src_rel")"
 
     if [ ! -f "$src_abs" ]; then
@@ -54,11 +57,26 @@ copy_one() {
         return 10
     fi
 
+    # __Attachment/ 以下の階層(YYYY/MM等)を維持する
+    local dest_rel
+    local attachment_dir="$ROOT/__Attachment/"
+    # パス比較のために正規化しておく
+    local norm_src_abs; norm_src_abs="$(normalize_path "$src_abs")"
+    local norm_attach_dir; norm_attach_dir="$(normalize_path "$attachment_dir")"
+
+    if [[ "$norm_src_abs" == "$norm_attach_dir"* ]]; then
+        dest_rel="${norm_src_abs#$norm_attach_dir}"
+    else
+        dest_rel="$(basename "$src_rel")"
+    fi
+
     local dest_path="$upload_root/$USER_ID/$dest_rel"
     local dest_dir; dest_dir="$(dirname "$dest_path")"
 
     if [ -f "$dest_path" ]; then
         log_info "  [Upload] Skip: already exists -> $dest_path"
+        # 既に存在する場合もリンク置換用にマップへ記録
+        echo "${src_rel}|${dest_path}" >> "$ROOT/.git/upload_links_map.tmp"
         return 10
     fi
 
@@ -72,11 +90,14 @@ copy_one() {
 
     if [ "${DRY_RUN:-false}" = "true" ]; then
         log_info "[Upload] DRY-RUN: cp \"$src_abs\" \"$dest_path\""
+        echo "${src_rel}|${dest_path}" >> "$ROOT/.git/upload_links_map.tmp"
         return 0
     else
         if cp -f "$src_abs" "$dest_path"; then
             log_info "[Upload] Copied: \"$src_abs\" -> \"$dest_path\""
             rm -f "$src_abs" || log_warn "[Upload] Failed to delete local file: \"$src_abs\""
+            # リンク置換用に元のファイル名とアップロード先パスの対応を記録
+            echo "${src_rel}|${dest_path}" >> "$ROOT/.git/upload_links_map.tmp"
             return 0
         else
             log_error "[Upload] Copy failed: \"$src_abs\" -> \"$dest_path\""; return 1
@@ -93,7 +114,11 @@ main() {
     # 画像リンクの抽出
     local images=()
     while read -r img; do
-        [ -n "$img" ] && images+=("$img")
+        if [ -n "$img" ]; then
+            # エイリアスやサイズ指定 (| 以降) を除去
+            img="${img%%|*}"
+            images+=("$img")
+        fi
     done < <(grep -oE '!\[\[[^]]+\]\]' "$md_abs" | sed -E 's/^!\[\[//; s/\]\]$//'; grep -oE '!\[[^]]*\]\((<[^>]+>|[^)]+)\)' "$md_abs" | sed -E 's/^!\[[^]]*\]\(<?([^)>]+)>?\)$/\1/')
 
     # ユニーク化

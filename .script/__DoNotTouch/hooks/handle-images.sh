@@ -90,6 +90,10 @@ process_single_file() {
 log_info "=== Session Started ==="
 [ "${DRY_RUN,,}" = "true" ] && log_warn "!!! DRY RUN MODE: No changes will be made !!!"
 
+# マッピングファイルのリセット (upload-images と rewrite-mdlink の連携用)
+MAP_FILE="$ROOT/.git/upload_links_map.tmp"
+rm -f "$MAP_FILE"
+
 staged_files="$(get_staged_markdowns)"
 if [ -z "$staged_files" ]; then
     log_info "No markdown files staged. Skipping."
@@ -101,6 +105,9 @@ while IFS= read -r file; do
 done <<< "$staged_files"
 
 log_info "=== Session Completed ==="
+
+# 終了時にマッピングファイルをクリーンアップ
+rm -f "$MAP_FILE"
 
 if [ "$UPLOAD_FAIL_COUNT" -gt 0 ]; then
     log_error "Upload failures detected: $UPLOAD_FAIL_COUNT. Aborting commit."
