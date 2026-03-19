@@ -4,8 +4,16 @@
 set -eu
 hook_dir="$(dirname "$0")"
 
-# ps1版を廃止し、整理されたshスクリプトを直列で実行
+# 1. プッシュポリシーの確認
 bash "$hook_dir/check-push-policy.sh" "$@" || exit $?
+
+# 2. 管轄サブモジュールの事前プッシュ
+# (サブモジュールが先にリモートに存在していないと、親のGitlinkを他者が参照できないため)
+if [ -f "$hook_dir/push-submodules.sh" ]; then
+    bash "$hook_dir/push-submodules.sh" "git" || true
+fi
+
+# 3. 共有リポジトリのロック取得 (Push 直前)
 bash "$hook_dir/collision-check-and-lock.sh" "$@" || exit $?
 
 exit 0
