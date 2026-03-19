@@ -4,10 +4,12 @@ tags:
 title: .script/README.md
 ---
 
-# 📦 スクリプト一覧と運用ガイド
+## 📦 スクリプト一覧と運用ガイド
 
-このリポジトリには、**管理者用**と**利用者用**の PowerShell スクリプトが含まれている。
-共有フォルダ構造は以下の方針に従う：
+このリポジトリには、管理者用と利用者用の PowerShell スクリプトが含まれています。
+これらのスクリプトは _Common.ps1 という共通モジュールを使用し、リポジトリ直下の .env ファイルから設定を一括で読み込むように設計されています。
+
+## 📁 共有フォルダ構造の前提
 
 ```
 R:\
@@ -21,11 +23,13 @@ R:\
 
 ---
 
-## ✅ 管理者が実行すべきスクリプト
+## 👑 管理者が実行すべきスクリプト（環境構築）
+
+チーム全体の環境を初期構築する際に管理者が実行します。
 
 ### 1. `Create-BareRepos.ps1`
 
-- **目的**: ID リストに基づき、共有フォルダにベアリポジトリを作成。
+- **目的**: ユーザーの ID リスト（.txt）に基づき、共有フォルダ上に空のベアリポジトリを一括作成し、初期コミットを行います。
 
 #### Usage
 
@@ -42,7 +46,7 @@ powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
 
 ### 2. `Generate-Gitmodules.ps1`
 
-- **目的**: `.gitmodules` を自動生成（Shared のサブモジュール定義）。
+- **目的**: `.gitmodules` を自動生成（Shared のサブモジュール定義）します。
 
 #### Usage
 
@@ -58,7 +62,8 @@ powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
 
 ### 3. `Init-Submodules.ps1`
 
-- **目的**: メインリポジトリに付属するサブモジュールの初期化
+- **目的**: .gitmodules に定義されたサブモジュールを実際にローカルリポジトリへ登録（add）し、Gitlink をステージして初期コミットおよび sync/update までを一気に完了させます。
+- **備考**: Register と Finalize の処理はすべてこのスクリプトに統合されています。
 
 #### Usage
 
@@ -130,11 +135,13 @@ powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
 
 ---
 
-## ✅ 利用者が実行すべきスクリプト
+## 👩‍💻 利用者が実行すべきスクリプト（初回セットアップ）
 
-### 1. `SoftwareCheck.ps1`
+利用者が自分の PC で初めて環境を構築する際の手順です。基本的には上から順に実行するだけで完了します。
 
-- **目的**: Obsidian / PortableGit / VSCode のインストール状況を確認し、共有フォルダの最新インストーラで更新。
+### 1. `SoftwareCheck.ps1` (STEP 1: 必須ソフトウェアの導入・更新)
+
+- **目的**:  Obsidian / PortableGit / VSCode のインストール状況を確認し、共有フォルダ上の最新インストーラを用いて自動インストール・更新を行います。
 - **設定方針**: `.env` により共有フォルダパスを自動指定（引数不要）。
 
 #### Usage
@@ -154,7 +161,7 @@ powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
 
 ---
 
-### 2. `RegisterSafeDirectory.ps1`
+### 2. `RegisterSafeDirectory.ps1` (STEP 2: リポジトリの取得と初期化（全自動）)
 
 - **目的**: Git の `safe.directory` を一括登録します。対象は以下の通り:
   - **id_list.txt に記載されたユーザ ID** に基づくベアリポジトリ
@@ -188,9 +195,9 @@ powershell.exe -ExecutionPolicy Bypass -NoProfile -STA `
 
 ---
 
-### 3. `Clone-and-Initialize.ps1`
+### 3. `Clone-and-Initialize.ps1` (STEP 3: Git コミット情報の設定)
 
-- **目的**: 個人ベアリポジトリをクローンし、初期化（サブモジュール、hooks、config）。
+- **目的**: git のコミットに必要な `user.name` と `user.email` を、Windows の既定の Outlook アカウントから自動取得して設定します。
 
 #### Usage
 
